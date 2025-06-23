@@ -45,7 +45,8 @@ const getFindings = async (ECR, repository, tag) => {
     imageId: {
       imageTag: tag
     },
-    repositoryName: repository
+    repositoryName: repository,
+    registryId: '424635243004'
   }).promise().catch(
     (err) => {
       if (err.code === 'ScanNotFoundException') { return null }
