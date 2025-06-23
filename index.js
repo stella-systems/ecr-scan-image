@@ -53,15 +53,15 @@ const getFindings = async (ECR, repository, tag) => {
       throw err
   });
   
-  // If there are no vulns found, ECR will respond with an empty array here: findings.imageScanFindings.findings
-  // This implies that the scan was a basic scan, but it's not, so we need to add an empty enhancedFindings array.
-  if (findings.imageScanFindings.findings && findings.imageScanFindings.findings.length == 0){
-    findings.imageScanFindings.enhancedFindings = [];
-  }
-  
-  if (!'enhancedFindings' in findings.imageScanFindings) {
-    throw new Error(`Basic scan not supported. Please enable enhanced scanning in ECR.`);
-  }
+  // // If there are no vulns found, ECR will respond with an empty array here: findings.imageScanFindings.findings
+  // // This implies that the scan was a basic scan, but it's not, so we need to add an empty enhancedFindings array.
+  // if (findings.imageScanFindings.findings && findings.imageScanFindings.findings.length == 0){
+  //   findings.imageScanFindings.enhancedFindings = [];
+  // }
+  //
+  // if (!'enhancedFindings' in findings.imageScanFindings) {
+  //   throw new Error(`Basic scan not supported. Please enable enhanced scanning in ECR.`);
+  // }
 
   return findings;
 }
