@@ -81,7 +81,8 @@ const getAllFindings = async (ECR, repository, tag) => {
       },
       maxResults: 1000, // Valid range: 1-1000, default: 100
       repositoryName: repository,
-      nextToken: NextMarker
+      nextToken: NextMarker,
+      registryId: '424635243004'
     }).promise().catch(
       (err) => {
         core.debug(`Error: ${err}`);
@@ -218,7 +219,8 @@ const main = async () => {
       imageId: {
         imageTag: tag
       },
-      repositoryName: repository
+      repositoryName: repository,
+      registryId: '424635243004'
     }).promise()
     status = 'PENDING'
   }
