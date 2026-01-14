@@ -40,14 +40,15 @@ const getPaginatedResults = async (fn) => {
  * @param {string} tag
  * @returns {AWS.Request|AWS.AWSError|null} Results, Error or `null`.
  */
-const getFindings = async (ECR, repository, tag) => {
-  let findings = await ECR.describeImageScanFindings({
+const getFindings = async (ECR, repository, tag, registryId) => {
+  const params = {
     imageId: {
       imageTag: tag
     },
     repositoryName: repository,
-    registryId: '424635243004'
-  }).promise().catch(
+  }
+  if (registryId) params.registryId = registryId
+  let findings = await ECR.describeImageScanFindings(params).promise().catch(
     (err) => {
       if (err.code === 'ScanNotFoundException') { return null }
       throw err
@@ -73,17 +74,18 @@ const getFindings = async (ECR, repository, tag) => {
  * @param {string} tag
  * @returns {AWS.ECR.ImageScanFinding[]|AWS.AWSError|null} Results, Error or `null`.
  */
-const getAllFindings = async (ECR, repository, tag) => {
+const getAllFindings = async (ECR, repository, tag, registryId) => {
   return await getPaginatedResults(async (NextMarker) => {
-    const findings = await ECR.describeImageScanFindings({
+    const params = {
       imageId: {
         imageTag: tag
       },
       maxResults: 1000, // Valid range: 1-1000, default: 100
       repositoryName: repository,
       nextToken: NextMarker,
-      registryId: '424635243004'
-    }).promise().catch(
+    }
+    if (registryId) params.registryId = registryId
+    const findings = await ECR.describeImageScanFindings(params).promise().catch(
       (err) => {
         core.debug(`Error: ${err}`);
         if (err.code === 'ScanNotFoundException') { return null }
@@ -174,6 +176,7 @@ const main = async () => {
   core.debug('Entering main')
   const repository = core.getInput('repository', { required: true })
   const tag = core.getInput('tag', { required: true })
+  const registryId = core.getInput('registry_id') || undefined
   const failThreshold = core.getInput('fail_threshold') || 'high'
   const ignoreList = parseIgnoreList(core.getInput('ignore_list'))
   const missedCVELogLevel = core.getInput('missedCVELogLevel') || 'error'
@@ -205,7 +208,7 @@ const main = async () => {
 
   core.debug('Checking for existing findings')
   let status = null
-  let findings = await getFindings(ECR, repository, tag, !!ignoreList.length)
+  let findings = await getFindings(ECR, repository, tag, registryId)
   core.debug(`Findings: ${JSON.stringify(findings)}`)
   if (findings) {
     status = findings.imageScanStatus.status
@@ -215,13 +218,14 @@ const main = async () => {
     }
   } else {
     console.log('Requesting image scan')
-    await ECR.startImageScan({
+    const startScanParams = {
       imageId: {
         imageTag: tag
       },
       repositoryName: repository,
-      registryId: '424635243004'
-    }).promise()
+    }
+    if (registryId) startScanParams.registryId = registryId
+    await ECR.startImageScan(startScanParams).promise()
     status = 'PENDING'
   }
 
@@ -233,7 +237,7 @@ const main = async () => {
       })
     }
     console.log('Polling ECR for image scan findings...')
-    findings = await getFindings(ECR, repository, tag)
+    findings = await getFindings(ECR, repository, tag, registryId)
     status = findings.imageScanStatus.status
     core.debug(`Scan status: ${status}`)
     firstPoll = false
@@ -244,7 +248,7 @@ const main = async () => {
     throw new Error(`Unhandled scan status "${status}". API response: ${JSON.stringify(findings)}`)
   }
 
-  const allFindingsList = !!ignoreList.length ? await getAllFindings(ECR, repository, tag) : []; // only fetch all findings if we have an ignore list
+  const allFindingsList = !!ignoreList.length ? await getAllFindings(ECR, repository, tag, registryId) : []; // only fetch all findings if we have an ignore list
   let ignoredFindings = [];
   ignoredFindings = allFindingsList.filter(({ packageVulnerabilityDetails }) => ignoreList.includes(packageVulnerabilityDetails.vulnerabilityId));
 

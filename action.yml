@@ -7,6 +7,9 @@ inputs:
   tag:
     description: Image tag to scan.
     required: true
+  registry_id:
+    description: AWS ECR registry ID (account ID). If not provided, uses default registry.
+    required: false
   fail_threshold:
     description: >
       Fail if any vulnerabilities equal to or over this severity level are detected. Valid values: critical, high, medium, low, informational.
