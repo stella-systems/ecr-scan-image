@@ -260,7 +260,7 @@ const main = async () => {
   }
 
   const ignoredCounts = countIgnoredFindings(ignoredFindings)
-  const findingsDetails = findings.imageScanFindings.enhancedFindings || []
+  const findingsDetails = findings.imageScanFindings.enhancedFindings || findings.imageScanFindings.findings || []
   const counts = findings.imageScanFindings.findingSeverityCounts || {} // If no findings, default to empty object instead of undefined
   const critical = counts.CRITICAL || 0
   const high = counts.HIGH || 0
@@ -281,7 +281,14 @@ const main = async () => {
   core.setOutput('total', total.toString())
   core.startGroup('Findings')
   findingsDetails.forEach((findingDetail, index) => {
-    console.log(`${index + 1}. ${findingDetail.packageVulnerabilityDetails.vulnerabilityId} (${findingDetail.packageVulnerabilityDetails.vendorSeverity}) ${JSON.stringify(findingDetail.packageVulnerabilityDetails.cvss)} ${JSON.stringify(findingDetail.packageVulnerabilityDetails.vulnerablePackages)}`);
+    // Enhanced scanning structure
+    if (findingDetail.packageVulnerabilityDetails) {
+      console.log(`${index + 1}. ${findingDetail.packageVulnerabilityDetails.vulnerabilityId} (${findingDetail.packageVulnerabilityDetails.vendorSeverity}) ${JSON.stringify(findingDetail.packageVulnerabilityDetails.cvss)} ${JSON.stringify(findingDetail.packageVulnerabilityDetails.vulnerablePackages)}`);
+    }
+    // Basic scanning structure
+    else {
+      console.log(`${index + 1}. ${findingDetail.name} (${findingDetail.severity}) - ${findingDetail.uri}`);
+    }
   });
   core.endGroup()
   console.log('Vulnerabilities found:')
