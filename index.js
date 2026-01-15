@@ -40,27 +40,29 @@ const getPaginatedResults = async (fn) => {
  * @param {string} tag
  * @returns {AWS.Request|AWS.AWSError|null} Results, Error or `null`.
  */
-const getFindings = async (ECR, repository, tag) => {
-  let findings = await ECR.describeImageScanFindings({
+const getFindings = async (ECR, repository, tag, registryId) => {
+  const params = {
     imageId: {
       imageTag: tag
     },
-    repositoryName: repository
-  }).promise().catch(
+    repositoryName: repository,
+  }
+  if (registryId) params.registryId = registryId
+  let findings = await ECR.describeImageScanFindings(params).promise().catch(
     (err) => {
       if (err.code === 'ScanNotFoundException') { return null }
       throw err
   });
   
-  // If there are no vulns found, ECR will respond with an empty array here: findings.imageScanFindings.findings
-  // This implies that the scan was a basic scan, but it's not, so we need to add an empty enhancedFindings array.
-  if (findings.imageScanFindings.findings && findings.imageScanFindings.findings.length == 0){
-    findings.imageScanFindings.enhancedFindings = [];
-  }
-  
-  if (!'enhancedFindings' in findings.imageScanFindings) {
-    throw new Error(`Basic scan not supported. Please enable enhanced scanning in ECR.`);
-  }
+  // // If there are no vulns found, ECR will respond with an empty array here: findings.imageScanFindings.findings
+  // // This implies that the scan was a basic scan, but it's not, so we need to add an empty enhancedFindings array.
+  // if (findings.imageScanFindings.findings && findings.imageScanFindings.findings.length == 0){
+  //   findings.imageScanFindings.enhancedFindings = [];
+  // }
+  //
+  // if (!'enhancedFindings' in findings.imageScanFindings) {
+  //   throw new Error(`Basic scan not supported. Please enable enhanced scanning in ECR.`);
+  // }
 
   return findings;
 }
@@ -72,16 +74,18 @@ const getFindings = async (ECR, repository, tag) => {
  * @param {string} tag
  * @returns {AWS.ECR.ImageScanFinding[]|AWS.AWSError|null} Results, Error or `null`.
  */
-const getAllFindings = async (ECR, repository, tag) => {
+const getAllFindings = async (ECR, repository, tag, registryId) => {
   return await getPaginatedResults(async (NextMarker) => {
-    const findings = await ECR.describeImageScanFindings({
+    const params = {
       imageId: {
         imageTag: tag
       },
       maxResults: 1000, // Valid range: 1-1000, default: 100
       repositoryName: repository,
-      nextToken: NextMarker
-    }).promise().catch(
+      nextToken: NextMarker,
+    }
+    if (registryId) params.registryId = registryId
+    const findings = await ECR.describeImageScanFindings(params).promise().catch(
       (err) => {
         core.debug(`Error: ${err}`);
         if (err.code === 'ScanNotFoundException') { return null }
@@ -172,6 +176,7 @@ const main = async () => {
   core.debug('Entering main')
   const repository = core.getInput('repository', { required: true })
   const tag = core.getInput('tag', { required: true })
+  const registryId = core.getInput('registry_id') || undefined
   const failThreshold = core.getInput('fail_threshold') || 'high'
   const ignoreList = parseIgnoreList(core.getInput('ignore_list'))
   const missedCVELogLevel = core.getInput('missedCVELogLevel') || 'error'
@@ -203,7 +208,7 @@ const main = async () => {
 
   core.debug('Checking for existing findings')
   let status = null
-  let findings = await getFindings(ECR, repository, tag, !!ignoreList.length)
+  let findings = await getFindings(ECR, repository, tag, registryId)
   core.debug(`Findings: ${JSON.stringify(findings)}`)
   if (findings) {
     status = findings.imageScanStatus.status
@@ -213,12 +218,14 @@ const main = async () => {
     }
   } else {
     console.log('Requesting image scan')
-    await ECR.startImageScan({
+    const startScanParams = {
       imageId: {
         imageTag: tag
       },
-      repositoryName: repository
-    }).promise()
+      repositoryName: repository,
+    }
+    if (registryId) startScanParams.registryId = registryId
+    await ECR.startImageScan(startScanParams).promise()
     status = 'PENDING'
   }
 
@@ -230,7 +237,7 @@ const main = async () => {
       })
     }
     console.log('Polling ECR for image scan findings...')
-    findings = await getFindings(ECR, repository, tag)
+    findings = await getFindings(ECR, repository, tag, registryId)
     status = findings.imageScanStatus.status
     core.debug(`Scan status: ${status}`)
     firstPoll = false
@@ -241,7 +248,7 @@ const main = async () => {
     throw new Error(`Unhandled scan status "${status}". API response: ${JSON.stringify(findings)}`)
   }
 
-  const allFindingsList = !!ignoreList.length ? await getAllFindings(ECR, repository, tag) : []; // only fetch all findings if we have an ignore list
+  const allFindingsList = !!ignoreList.length ? await getAllFindings(ECR, repository, tag, registryId) : []; // only fetch all findings if we have an ignore list
   let ignoredFindings = [];
   ignoredFindings = allFindingsList.filter(({ packageVulnerabilityDetails }) => ignoreList.includes(packageVulnerabilityDetails.vulnerabilityId));
 
@@ -257,7 +264,7 @@ const main = async () => {
   }
 
   const ignoredCounts = countIgnoredFindings(ignoredFindings)
-  const findingsDetails = findings.imageScanFindings.enhancedFindings || []
+  const findingsDetails = findings.imageScanFindings.enhancedFindings || findings.imageScanFindings.findings || []
   const counts = findings.imageScanFindings.findingSeverityCounts || {} // If no findings, default to empty object instead of undefined
   const critical = counts.CRITICAL || 0
   const high = counts.HIGH || 0
@@ -278,7 +285,14 @@ const main = async () => {
   core.setOutput('total', total.toString())
   core.startGroup('Findings')
   findingsDetails.forEach((findingDetail, index) => {
-    console.log(`${index + 1}. ${findingDetail.packageVulnerabilityDetails.vulnerabilityId} (${findingDetail.packageVulnerabilityDetails.vendorSeverity}) ${JSON.stringify(findingDetail.packageVulnerabilityDetails.cvss)} ${JSON.stringify(findingDetail.packageVulnerabilityDetails.vulnerablePackages)}`);
+    // Enhanced scanning structure
+    if (findingDetail.packageVulnerabilityDetails) {
+      console.log(`${index + 1}. ${findingDetail.packageVulnerabilityDetails.vulnerabilityId} (${findingDetail.packageVulnerabilityDetails.vendorSeverity}) ${JSON.stringify(findingDetail.packageVulnerabilityDetails.cvss)} ${JSON.stringify(findingDetail.packageVulnerabilityDetails.vulnerablePackages)}`);
+    }
+    // Basic scanning structure
+    else {
+      console.log(`${index + 1}. ${findingDetail.name} (${findingDetail.severity}) - ${findingDetail.uri}`);
+    }
   });
   core.endGroup()
   console.log('Vulnerabilities found:')
